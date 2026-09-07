@@ -3036,8 +3036,8 @@ export class AgentBoxSessionManager {
     const lang = detectLanguage(`${request.description}\n${request.prompt}`);
     const langDirective = lang !== "English" ? `[System: respond in ${lang}]\n` : "";
     return `${langDirective}Task: ${request.description}\n\n${request.prompt.trim()}\n\n` +
-      `Complete this task now and end with a concise findings report — the caller only sees your ` +
-      `final report, not your intermediate steps. Do not ask for confirmation.` +
+      `Complete this task now. Answer every question, including failures, following the completion ` +
+      `instructions. The caller only sees your final answer. Do not ask for confirmation.` +
       (request.responseForm ? `\n\n${buildResponseFormPrompt(request.responseForm)}` : "");
   }
 

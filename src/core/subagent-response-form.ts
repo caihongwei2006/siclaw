@@ -1,3 +1,5 @@
+import { SUBAGENT_COMPLETION_INSTRUCTIONS } from "./subagent-registry.js";
+
 /** Parent-owned answer contract. The wire format is plain text: `name:\nanswer`. */
 export interface SubagentResponseField {
   name: string;
@@ -36,8 +38,8 @@ export const SUBAGENT_RESPONSE_INSTRUCTIONS = "INTERNAL SUB-AGENT RESPONSE CONTR
     "Do not output JSON, Markdown tables, code fences, visual cards, images, or artifact-only references. " +
     "This contract overrides presentation/report-card skills for this internal response. " +
     "For choice questions output only ONE listed key; the runtime expands it to its text for the parent. " +
-    "For free-text questions give concise facts directly, including needed evidence and coverage limits; " +
-    "if unknown or unavailable, state that and why. Never invent a finding to fill a field. " +
+    SUBAGENT_COMPLETION_INSTRUCTIONS + " " +
+    "Use the declared free-text fields for failure details; for successful questions return only the answer. " +
     "Do not repeat field headings inside answers. No introduction or footer.";
 
 export function buildResponseFormPrompt(form: SubagentResponseField[]): string {
