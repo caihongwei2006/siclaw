@@ -28,6 +28,8 @@ describe("processToolOutput", () => {
     expect(result.endsWith("B".repeat(4000))).toBe(true);
     expect(result).toContain("omitted chars 4001-6000");
     expect(result).toContain('"offset":1,"limit":100');
+    expect(result).toContain('lines 1-1; block 1; expand with read(');
+    expect(result).toContain('"offset":1,"limit":1');
 
     // Should contain the truncation marker
     expect(result).toContain("output truncated");

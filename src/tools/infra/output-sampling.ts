@@ -50,6 +50,26 @@ export function outputLineAt(starts: number[], offset: number): number {
   return low + 1;
 }
 
+export interface OmittedOutputBlock extends OutputRange {
+  id: number;
+  startLine: number;
+  endLine: number;
+}
+
+/** Stable 1-based gap ids, shared by the preview and its expansion tool. */
+export function omittedOutputBlocks(ranges: OutputRange[], starts: number[]): OmittedOutputBlock[] {
+  const blocks: OmittedOutputBlock[] = [];
+  for (let i = 1; i < ranges.length; i++) {
+    const start = ranges[i - 1].end;
+    const end = ranges[i].start;
+    if (end > start) blocks.push({
+      id: blocks.length + 1, start, end,
+      startLine: outputLineAt(starts, start), endLine: outputLineAt(starts, end - 1),
+    });
+  }
+  return blocks;
+}
+
 /** Keep retrieval breadcrumbs through every subsequent context/persistence trim. */
 export function outputReferences(text: string): string {
   return [...new Set(text.match(/^\[siclaw-output [^\r\n]+\]$/gm) ?? [])].join("\n");

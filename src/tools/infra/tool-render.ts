@@ -3,7 +3,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { randomBytes } from "node:crypto";
 import { Text } from "@earendil-works/pi-tui";
-import { OUTPUT_CHAR_BUDGET, outputLineAt, outputLineStarts, sampleOutputRanges } from "./output-sampling.js";
+import { OUTPUT_CHAR_BUDGET, omittedOutputBlocks, outputLineAt, outputLineStarts, sampleOutputRanges } from "./output-sampling.js";
 import { currentToolOutputStore } from "./tool-output-store.js";
 
 const PREVIEW_LINES = 5;
@@ -53,17 +53,24 @@ export function processToolOutput(text: string): string {
 
   const context = currentToolOutputStore();
   const outputId = context?.store.save(clean);
+  const outputPath = context?.useToolReader ? undefined : context ? context.store.file(outputId!) : saveTempFile(clean);
   const readHint = context?.useToolReader
     ? `tool_output(${JSON.stringify({ output_id: outputId, offset: 1, limit: 100 })})`
-    : `read(${JSON.stringify({ path: context ? context.store.file(outputId!) : saveTempFile(clean), offset: 1, limit: 100 })})`;
+    : `read(${JSON.stringify({ path: outputPath, offset: 1, limit: 100 })})`;
   const starts = outputLineStarts(clean);
   const ranges = sampleOutputRanges(clean);
+  const blocks = omittedOutputBlocks(ranges, starts);
   const sampledChars = ranges.reduce((sum, range) => sum + range.end - range.start, 0);
   const parts = [`[siclaw-output ${clean.length} chars; ${starts.length} lines total; output truncated to ${sampledChars} sampled chars (8000 base budget plus head/tail minima); read selected lines with ${readHint}]`];
   let previousEnd = 0;
+  let blockIndex = 0;
   for (const range of ranges) {
     if (range.start > previousEnd) {
-      parts.push(`... [omitted chars ${previousEnd + 1}-${range.start}; lines ${outputLineAt(starts, previousEnd)}-${outputLineAt(starts, range.start - 1)}] ...`);
+      const block = blocks[blockIndex++];
+      const expandHint = context?.useToolReader
+        ? `tool_output(${JSON.stringify({ output_id: outputId, block_id: block.id })})`
+        : `read(${JSON.stringify({ path: outputPath, offset: block.startLine, limit: block.endLine - block.startLine + 1 })})`;
+      parts.push(`... [omitted chars ${block.start + 1}-${block.end}; lines ${block.startLine}-${block.endLine}; block ${block.id}; expand with ${expandHint}] ...`);
     }
     parts.push(`[chars ${range.start + 1}-${range.end}; lines ${outputLineAt(starts, range.start)}-${outputLineAt(starts, range.end - 1)}; boundaries may split lines]\n${clean.slice(range.start, range.end)}`);
     previousEnd = range.end;

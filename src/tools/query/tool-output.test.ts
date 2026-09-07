@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { ToolOutputStore } from "../infra/tool-output-store.js";
+import { ToolOutputStore, withToolOutputStore } from "../infra/tool-output-store.js";
 import { createToolOutputTool, registration } from "./tool-output.js";
 import { postExecSecurity } from "../infra/security-pipeline.js";
 import { ToolRegistry, type ToolRefs } from "../../core/tool-registry.js";
@@ -17,6 +17,63 @@ beforeEach(() => {
 afterEach(() => fs.rmSync(directory, { recursive: true, force: true }));
 
 describe("saved tool output", () => {
+  it("expands the block advertised by the preview into its inclusive original line range", async () => {
+    const text = Array.from({ length: 360 }, (_, i) => `${String(i + 1).padStart(3, "0")}${"x".repeat(96)}\n`).join("");
+    const preview = withToolOutputStore(store, () => postExecSecurity(text, null));
+    // The first omitted gap is characters 2001–8800: complete original lines 21–88.
+    expect(preview).toContain("omitted chars 2001-8800; lines 21-88; block 1;");
+    const call = /block 1; expand with tool_output\((\{[^\n]+?\})\)/.exec(preview);
+    expect(call).not.toBeNull();
+    const result = await createToolOutputTool(new ToolOutputStore(store.directory)).execute("expand", JSON.parse(call![1]));
+    expect(result.details).toMatchObject({
+      block: { block_id: 1, start_line: 21, end_line: 88 },
+      offset: 21, end_line: 88, block_complete: true,
+    });
+    expect(result.details).not.toHaveProperty("next");
+    expect((result.content[0] as { text: string }).text.endsWith(text.slice(2000, 8800))).toBe(true);
+  });
+
+  it("continues a large block at 8k per page and stops before later lines", () => {
+    // The sampled gap is under 8k, but expanding its complete boundary lines
+    // crosses two 9k lines, so the block needs multiple bounded reads.
+    const text = Array.from({ length: 12 }, (_, i) => `${String(i + 1).padStart(4, "0")}${"x".repeat(8995)}\n`).join("");
+    const id = store.save(text);
+    let page = store.read(id, undefined, undefined, undefined, 1);
+    const block = page.block!;
+    expect(page.next?.block_id).toBe(1);
+    let collected = "";
+    for (;;) {
+      expect(page.output.length).toBeLessThanOrEqual(8000);
+      collected += page.output;
+      if (!page.next) break;
+      const next = page.next;
+      page = store.read(id, next.offset, undefined, next.column, next.block_id);
+    }
+    expect(page.block_complete).toBe(true);
+    expect(collected).toBe(text.slice((block.start_line - 1) * 9000, block.end_line * 9000));
+    expect(page.end_line).toBe(block.end_line);
+    expect(page.end_line).toBeLessThan(12);
+    expect(() => store.read(id, block.end_line + 1, undefined, undefined, 1)).toThrow("within block");
+    expect(() => store.read(id, undefined, undefined, undefined, 99)).toThrow("No omitted block");
+    expect(() => store.read(id, undefined, undefined, undefined, 0)).toThrow("positive integer");
+  });
+
+  it("includes full boundary lines and continues a block that occupies one very long line", () => {
+    const line = "🙂".repeat(18000);
+    const id = store.save(line + "\nAFTER");
+    let page = store.read(id, undefined, undefined, undefined, 1);
+    expect(page.block).toEqual({ block_id: 1, start_line: 1, end_line: 1 });
+    let collected = "";
+    for (;;) {
+      expect(page.output.isWellFormed()).toBe(true);
+      collected += page.output;
+      if (!page.next) break;
+      page = store.read(id, page.next.offset, undefined, page.next.column, page.next.block_id);
+    }
+    expect(collected).toBe(line + "\n");
+    expect(page.block_complete).toBe(true);
+  });
+
   it("reads omitted lines from the same stored output after store reconstruction", async () => {
     const text = Array.from({ length: 360 }, (_, i) => `${String(i + 1).padStart(3, "0")}${"x".repeat(96)}\n`).join("");
     const id = store.save(text);

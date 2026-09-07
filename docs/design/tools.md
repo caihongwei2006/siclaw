@@ -807,7 +807,19 @@ reads retain their existing 8,000-character page budget.
 
 ### Retrieval and lifetime
 
-`tool_output(output_id, offset, limit, column)` retrieves the saved, sanitized
+`tool_output(output_id, block_id)` expands a numbered omitted block from the preview.
+Each gap advertises its stable 1-based block id, original inclusive line range, and
+an exact expansion call. The reader calculates that range from the saved original
+and the same sampling algorithm. For example, a 36,000-character result with
+100-character lines marks block 1 as lines 21–88; expansion returns those full lines.
+When sampling cut through a line, expansion includes the entire boundary line, so
+it can repeat some already-visible text. The result reports `block.start_line`,
+`block.end_line`, and `block_complete`. Pages stay within 8,000 source characters;
+`next` includes `block_id`, `offset`, and `column`, and stops at the block's last
+line rather than continuing through the rest of the output. An explicit `offset`
+for a block must remain within its line range.
+
+`tool_output(output_id, offset, limit, column)` still retrieves the saved, sanitized
 result without re-executing the command. It returns `total_lines`, `total_chars`,
 and at most 8,000 source characters. Line/column positions are 1-based; `limit`
 defaults to 100 lines. The returned `next.offset` and `next.column` allow continuation
