@@ -773,3 +773,61 @@ on-disk file the model reads. Differences from bash background:
 
 The per-session concurrency cap (`getBackgroundBashConcurrency`) counts ALL background
 exec jobs (bash + node + pod + host + local) together; over the cap, the tool falls back to foreground.
+
+## 10. Foreground output sampling and retrieval
+
+The shared `postExecSecurity` pipeline sanitizes the complete command result before
+`processToolOutput` saves and samples it. This covers foreground bash, remote exec,
+and script tools. Background jobs retain their separate `task_output` contract.
+
+For source length `L > B`, with `B = 8000` UTF-16 characters:
+
+- Sample count `N = ceil(L / B)`; initially distribute `B` characters equally
+  among `N` samples. The count always uses the original budget.
+- Enforce at least 2,000 characters **each** for the head and tail. Only the
+  extra characters needed to reach those minima are outside the base budget;
+  interior samples keep their original allocations. Larger edge samples stay
+  unchanged.
+- Anchor the first sample at the start and the last at the end. Distribute the
+  remaining `L - sum(sample sizes)` characters equally among the `N - 1` gaps.
+- Round sample sizes/gaps to integer offsets. Avoid splitting surrogate pairs:
+  shrink boundaries inward, except when doing so would violate an edge minimum;
+  in that case expand that edge by one UTF-16 unit. Pathological outputs cap `N`
+  at `B`, since more than `B` nonempty base samples cannot fit the source budget.
+
+For 36,000 characters this yields sample sizes `2000, 1600, 1600, 1600, 2000`:
+8,800 source characters in total, separated by four 6,800-character gaps. Samples
+are displayed in source order. Labels include original character and line ranges;
+omitted ranges are explicit. The retrieval reference reports the actual sampled
+character count. Labels/retrieval metadata are additional to the source budget.
+Short outputs pass through unchanged.
+
+The edge minima apply to the initial sampled preview; explicit `tool_output` line
+reads retain their existing 8,000-character page budget.
+
+### Retrieval and lifetime
+
+`tool_output(output_id, offset, limit, column)` retrieves the saved, sanitized
+result without re-executing the command. It returns `total_lines`, `total_chars`,
+and at most 8,000 source characters. Line/column positions are 1-based; `limit`
+defaults to 100 lines. The returned `next.offset` and `next.column` allow continuation
+within a long line. A trailing newline creates a final empty line, consistent with
+splitting on `\n`. The tool is included in both command and script capability groups.
+Legacy explicit tool-name whitelists that omit `tool_output` retain the file/`read`
+reference, without silently widening their tool permissions.
+
+`ToolRegistry` wraps execution with `AsyncLocalStorage` to route the shared output
+pipeline to a task-owned `ToolOutputStore`. This avoids a process-global current
+user/session and isolates concurrent LocalSpawner calls. Files are scoped to the
+runtime-provided task directory; no full-output strings are retained in a global
+memory cache. Context pruning, the context-budget guard, and persistence truncation
+preserve the `[siclaw-output ...]` reference even when they discard the body.
+
+AgentBox stores output under the logical session's `tool-output` directory, including
+child output in subdirectories. Idle `release`, config rebuild, and shutdown retain
+files for restoration; explicit `close` removes that task's output even when its
+runtime instance has already been evicted. CLI keeps output across runtime swaps and
+reclaims output for sessions used by that CLI host on exit. There is no age-based
+TTL. Closing a task invalidates its saved-output references. The storage is bounded
+by command capture limits upstream; it cannot restore output that execution itself
+never captured (for example, a process killed at its output buffer limit).
