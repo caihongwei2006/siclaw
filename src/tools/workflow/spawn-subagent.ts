@@ -41,8 +41,10 @@ import {
 } from "../../core/subagent-registry.js";
 import { renderTierMenuForDescription, type ChildModelOutcome } from "../../core/subagent-models.js";
 import { validateAndRenderGroupPlan } from "../../agentbox/subagent-group.js";
+import { validateResponseForm, type SubagentResponseField } from "../../core/subagent-response-form.js";
 
 interface SpawnSubagentParams {
+  response_form: SubagentResponseField[];
   description: string;
   task_template?: string;
   items: Array<string | Record<string, string>>;
@@ -166,10 +168,24 @@ export function createSpawnSubagentTool(
     label: "Spawn Sub-agent",
     renderCall: (_a, theme) => new Text(theme.fg("toolTitle", theme.bold("spawn_subagent")), 0, 0),
     renderResult: renderTextResult,
-    description:
-      buildDescription(isSubagentGroupEnabled(), backgroundAllowed) +
+    description: buildDescription(isSubagentGroupEnabled(), backgroundAllowed) +
+      "\n\nREQUIRED response_form: define the questions every child must answer. Use free-text fields for " +
+      "facts/evidence/coverage and options for a single-choice decision (include an unknown option when needed). " +
+      "Carry all target identifiers and known facts in the task briefing; the form defines the deliverable. " +
+      "Children fill name + colon + newline + answer as plain text. Option keys are expanded to their " +
+      "meaning in the returned summaries. Example: [{name:'cause', question:'What caused the failure?', " +
+      "options:{A:'Upstream service error',B:'Insufficient evidence'}}, {name:'evidence',question:'Exact time and evidence?'}]. " +
+      "Omit reduce_prompt when the filled item forms already answer your task; synthesis costs another sub-agent run. " +
+      "If supplied, synthesis fills the same form for the group." +
       renderTierMenuForDescription(tierMenu),
     parameters: Type.Object({
+      response_form: Type.Array(Type.Object({
+        name: Type.String({ description: "Unique field heading, without colons or newlines." }),
+        question: Type.String({ description: "Question to answer, including required facts and completion criteria." }),
+        options: Type.Optional(Type.Record(Type.String(), Type.String(), {
+          description: "Single-choice key-to-text mapping, e.g. A: Upstream service error. Omit for a fill-in answer.",
+        })),
+      }), { minItems: 1, description: "Required answer form for each item and optional synthesis. All answers return as plain text." }),
       description: Type.String({ description: "Short (3-5 word) label for the task or batch." }),
       task_template: Type.Optional(
         Type.String({
@@ -278,6 +294,9 @@ export function createSpawnSubagentTool(
       });
       if (!plan.ok) return errorResult(plan.error);
 
+      const formError = validateResponseForm(p.response_form);
+      if (formError) return errorResult(formError);
+
       // Conditional default (design §"Tool layer (single entry)"): a single item runs foreground (grab the result and
       // keep reasoning), a multi-item batch runs background (asymmetric harm — each side fits its own
       // failure mode). An explicit run_in_background always wins; the flag is force-false while gated.
@@ -336,6 +355,7 @@ export function createSpawnSubagentTool(
       const result = await executor(
         {
           description,
+          responseForm: p.response_form,
           renderedTasks: plan.tasks,
           reducePrompt,
           subagentType: type.agentType,
