@@ -187,7 +187,11 @@ export function createSpawnSubagentTool(
       "Every question needs an answer; a failure counts. Include a free-text field for actual failed commands, " +
       "observed failures, and core errors not to repeat; use 'Not applicable' for that field on success. " +
       "If supplied, synthesis fills the same form for the group." +
-      renderTierMenuForDescription(tierMenu),
+      renderTierMenuForDescription(tierMenu) +
+      "\n\nYou are supposed to lead to a conclusion using ONE dispatch of subagents, if not, you shall give a serious " +
+      "reason of why subagent utterly failed your expectation, or things you must do yourself before going to " +
+      "the next phase that you are looking at/answering user query, which is the design purpose. Trust your " +
+      "subagents, don't repeat faults.",
     parameters: Type.Object({
       response_form: Type.Array(Type.Object({
         name: Type.String({ description: "Unique field heading, without colons or newlines." }),
